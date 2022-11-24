@@ -1,0 +1,23 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Get Conan
+      uses: turtlebrowser/get-conan@v1.1
+    - name: Configure conan
+      run: conan install .
+    - name: CMake
+      run: cmake .
+    - name: Build
+      run: make
