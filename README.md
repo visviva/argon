@@ -1,4 +1,5 @@
 # OpenSSL DTLS Echo Server
+[![C/C++ CI](https://github.com/visviva/argon/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/visviva/argon/actions/workflows/c-cpp.yml)
 
 This is just a quick hackup for a DTLS echo server using openssl 1.0.2. It works but MTU settings are completely ignored for the moment.
 For whatever reason `valgrind` is also crashing in some random libuv function.
