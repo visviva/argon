@@ -13,7 +13,7 @@
 
 using namespace spdlog;
 
-void hexdump(void* ptr, int buflen)
+static void hexdump(void* ptr, int buflen)
 {
     unsigned char* buf = (unsigned char*)ptr;
     int i, j;
@@ -107,33 +107,28 @@ void send(peer_id& peer, uv_buf_t buffer)
                 });
 }
 
-SSL* get_ssl(const secure_state& state)
+static SSL* get_ssl(const secure_state& state)
 {
     return std::get<0>(state);
 }
 
-BIO* get_rbio(const secure_state& state)
+static BIO* get_network_bio(const secure_state& state)
 {
     return std::get<1>(state);
 }
 
-BIO* get_wbio(const secure_state& state)
-{
-    return std::get<2>(state);
-}
-
-char* get_buffer(secure_state& state)
+static char* get_buffer(secure_state& state)
 {
     return std::get<3>(state).data();
 }
 
-void print_ssl_state(const secure_state& state)
+static void print_ssl_state(const secure_state& state)
 {
     const auto* text = SSL_state_string_long(std::get<0>(state));
     info("SSL state: {}", text);
 }
 
-void print_error(const secure_state& state, int error_num)
+static void print_error(const secure_state& state, int error_num)
 {
     auto err = SSL_get_error(get_ssl(state), error_num);
 
@@ -150,7 +145,7 @@ void process(peer_id& peer, uv_buf_t data)
     auto& ssl = std::get<3>(peer);
     char* buffer = get_buffer(ssl);
 
-    BIO_write(get_rbio(ssl), data.base, static_cast<int>(data.len));
+    BIO_write(get_network_bio(ssl), data.base, static_cast<int>(data.len));
 
     if (!SSL_is_init_finished(get_ssl(ssl)))
     {
@@ -164,10 +159,10 @@ void process(peer_id& peer, uv_buf_t data)
         }
         print_ssl_state(ssl);
 
-        auto len = BIO_pending(get_wbio(ssl));
+        auto len = BIO_pending(get_network_bio(ssl));
         if (len > 0)
         {
-            auto nread = BIO_read(get_wbio(ssl), buffer, len);
+            auto nread = BIO_read(get_network_bio(ssl), buffer, len);
             auto buf = uv_buf_init(buffer, nread);
             send(peer, buf);
         }
@@ -175,14 +170,18 @@ void process(peer_id& peer, uv_buf_t data)
     }
 
     // decrypt, print to stdout, encrypt and send back
+
     auto nread = SSL_read(get_ssl(ssl), buffer, 5000);
+
     std::string clear_text(get_buffer(ssl), nread);
     info("Echo: {}", clear_text);
+
     SSL_write(get_ssl(ssl), get_buffer(ssl), nread);
-    auto len = BIO_pending(get_wbio(ssl));
+
+    auto len = BIO_pending(get_network_bio(ssl));
     if (len > 0)
     {
-        BIO_read(get_wbio(ssl), buffer, len);
+        BIO_read(get_network_bio(ssl), buffer, len);
         auto buf = uv_buf_init(buffer, len);
         send(peer, buf);
     }
@@ -193,12 +192,14 @@ secure_state create_secure_state(SSL_CTX* context)
     auto* ssl = SSL_new(context);
     SSL_set_accept_state(ssl);
 
-    auto* rbio = BIO_new(BIO_s_mem());
-    auto* wbio = BIO_new(BIO_s_mem());
+    BIO* internal_bio = nullptr;
+    BIO* network_bio = nullptr;
 
-    SSL_set_bio(ssl, rbio, wbio);
+    BIO_new_bio_pair(&internal_bio, 0, &network_bio, 0);
 
-    return {ssl, rbio, wbio, {}};
+    SSL_set_bio(ssl, internal_bio, internal_bio);
+
+    return {ssl, network_bio, internal_bio, {}};
 }
 
 SSL_CTX* initialize_secure_context(const std::string& certificate, const std::string& key, const std::string ca)
